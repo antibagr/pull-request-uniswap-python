@@ -2,7 +2,7 @@ import functools
 import json
 import math
 import os
-from typing import Any, Generator, List, Sequence, Tuple, Union
+from typing import Any, Generator, List, Optional, Sequence, Tuple, Union
 
 import lru
 from web3 import Web3
@@ -144,3 +144,7 @@ def realised_fee_percentage(fee: int, amount_in: int) -> float:
     fee_percentage = fee_to_fraction(fee)
     fee_realised = math.ceil(amount_in * fee_percentage)
     return fee_realised / amount_in
+
+
+def create_web3(provider: Optional[str]) -> Web3:
+    return Web3.HTTPProvider(provider or os.environ["PROVIDER"], request_kwargs={"timeout": 60})

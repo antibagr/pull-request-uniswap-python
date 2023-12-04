@@ -37,6 +37,7 @@ class InvalidFeeTier(Exception):
     Raised when an invalid fee tier is used for a protocol that supports multiple fee tiers (Uniswap V3 currently).
     """
 
+
 class InvalidTokenArgument(Exception):
     """
     Raised when an invalid token argument is used.
@@ -52,6 +53,7 @@ class UniswapUnsupportedFunctionality:
         """
         Container for exceptions that are raised when a functionality is not supported by UniSwap V3.
         """
+
         class FeeOnTranfer(Exception):
             pass
 

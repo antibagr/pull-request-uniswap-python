@@ -1,7 +1,14 @@
 from typing import Dict
+from loguru import logger
 
 from eth_typing.evm import ChecksumAddress
 from web3 import Web3
+from uniswap.dto.entities.token import ERC20Token
+from uniswap.dto.exceptions import InvalidToken
+
+from uniswap.dto.types import AddressLike
+from uniswap.util import _addr_to_str, _load_contract
+from uniswap.dto.constants import ETH_ADDRESS
 
 tokens_mainnet: Dict[str, ChecksumAddress] = {
     k: Web3.to_checksum_address(v)
@@ -50,3 +57,39 @@ def get_tokens(netname: str) -> Dict[str, ChecksumAddress]:
         return tokens_arbitrum
     else:
         raise Exception(f"Unknown net '{netname}'")
+
+
+def get_token(w3: Web3, address: AddressLike, abi_name: str = "erc20") -> ERC20Token:
+    """
+    Retrieves metadata from the ERC20 contract of a given token, like its name, symbol, and decimals.
+    """
+    # FIXME: This function should always return the same output for the same input
+    #        and would therefore benefit from caching
+    if address == ETH_ADDRESS:
+        # This isn't exactly right, but for all intents and purposes,
+        # ETH is treated as a ERC20 by Uniswap.
+        return ERC20Token(
+            address=address,
+            name="ETH",
+            symbol="ETH",
+            decimals=18,
+        )
+    token_contract = _load_contract(w3, abi_name, address=address)
+    try:
+        _name = token_contract.functions.name().call()
+        _symbol = token_contract.functions.symbol().call()
+        decimals = token_contract.functions.decimals().call()
+    except Exception as exc:
+        logger.warning(
+            f"Exception occurred while trying to get token {_addr_to_str(address)}: {exc}"
+        )
+        raise InvalidToken(address) from exc
+    try:
+        name = _name.decode()
+    except:
+        name = _name
+    try:
+        symbol = _symbol.decode()
+    except:
+        symbol = _symbol
+    return ERC20Token(symbol, address, name, decimals)
