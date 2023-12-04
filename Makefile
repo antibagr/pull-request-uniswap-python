@@ -7,10 +7,13 @@ typecheck:
 	poetry run mypy --pretty
 
 lint:
-	poetry run flake8
+	poetry run flake8 uniswap tests
+	poetry run black --check
+	poetry run isort --check
 
 format:
-	black uniswap
+	poetry run black uniswap
+	poetry run isort uniswap
 
 format-abis:
 	npx prettier --write --parser=json uniswap/assets/*/*.abi

@@ -2,14 +2,7 @@ import functools
 import json
 import math
 import os
-from typing import (
-    Any,
-    Generator,
-    List,
-    Sequence,
-    Tuple,
-    Union,
-)
+from typing import Any, Generator, List, Sequence, Tuple, Union
 
 import lru
 from web3 import Web3
@@ -18,13 +11,13 @@ from web3.exceptions import NameNotFound
 from web3.middleware.cache import construct_simple_cache_middleware
 from web3.types import Middleware
 
-from .constants import (
+from uniswap.dto.constants import (
+    _tick_spacing,
     MAX_TICK,
     MIN_TICK,
     SIMPLE_CACHE_RPC_WHITELIST,
-    _tick_spacing,
 )
-from .types import Address, AddressLike
+from uniswap.dto.types import Address, AddressLike
 
 
 def _get_eth_simple_cache_middleware() -> Middleware:
@@ -119,9 +112,7 @@ def default_tick_range(fee: int) -> Tuple[int, int]:
 
 def nearest_tick(tick: int, fee: int) -> int:
     min_tick, max_tick = default_tick_range(fee)
-    assert (
-        min_tick <= tick <= max_tick
-    ), f"Provided tick is out of bounds: {(min_tick, max_tick)}"
+    assert min_tick <= tick <= max_tick, f"Provided tick is out of bounds: {(min_tick, max_tick)}"
 
     tick_spacing = _tick_spacing[fee]
     rounded_tick_spacing = round(tick / tick_spacing) * tick_spacing

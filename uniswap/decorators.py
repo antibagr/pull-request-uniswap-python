@@ -1,16 +1,10 @@
 import functools
-from typing import (
-    TYPE_CHECKING,
-    Callable,
-    List,
-    Optional,
-    TypeVar,
-)
+from typing import Callable, List, Optional, TYPE_CHECKING, TypeVar
 
 from typing_extensions import Concatenate, ParamSpec
 
-from .constants import ETH_ADDRESS
-from .types import AddressLike
+from uniswap.dto.constants import ETH_ADDRESS
+from uniswap.dto.types import AddressLike
 
 if TYPE_CHECKING:
     from .uniswap import Uniswap
@@ -49,12 +43,8 @@ def check_approval(
 
 def supports(
     versions: List[int],
-) -> Callable[
-    [Callable[Concatenate["Uniswap", P], T]], Callable[Concatenate["Uniswap", P], T]
-]:
-    def g(
-        f: Callable[Concatenate["Uniswap", P], T]
-    ) -> Callable[Concatenate["Uniswap", P], T]:
+) -> Callable[[Callable[Concatenate["Uniswap", P], T]], Callable[Concatenate["Uniswap", P], T]]:
+    def g(f: Callable[Concatenate["Uniswap", P], T]) -> Callable[Concatenate["Uniswap", P], T]:
         if f.__doc__ is None:
             f.__doc__ = ""
         f.__doc__ += """\n\n

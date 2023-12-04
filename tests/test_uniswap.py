@@ -1,24 +1,20 @@
-import pytest
-import os
-import subprocess
-import shutil
 import logging
-from typing import Generator
+import os
+import shutil
+import subprocess
 from contextlib import contextmanager
 from dataclasses import dataclass
 from time import sleep
+from typing import Generator
 
+import pytest
 from web3 import Web3
 
 from uniswap import Uniswap
 from uniswap.constants import ETH_ADDRESS
 from uniswap.exceptions import InsufficientBalance
 from uniswap.tokens import get_tokens
-from uniswap.util import (
-    _str_to_addr,
-    default_tick_range,
-    _addr_to_str,
-)
+from uniswap.util import _addr_to_str, _str_to_addr, default_tick_range
 
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO)
@@ -68,7 +64,6 @@ def test_assets(client: Uniswap):
     Buy some DAI and USDC to test with.
     """
     tokens = get_tokens(client.netname)
-
 
     for token_name, amount in [
         ("DAI", 10_000 * ONE_DAI),
@@ -132,7 +127,6 @@ def ganache() -> Generator[GanacheInstance, None, None]:
 @contextmanager
 def does_not_raise():
     yield
-
 
 
 ONE_ETH = 10**18

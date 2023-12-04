@@ -1,5 +1,5 @@
-from . import exceptions
 from .cli import main
-from .uniswap import Uniswap, _str_to_addr
+from .dto import exceptions
+from .uniswap import _str_to_addr, Uniswap
 
 __all__ = ["Uniswap", "exceptions", "_str_to_addr", "main"]

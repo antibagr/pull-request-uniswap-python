@@ -6,10 +6,10 @@ import click
 from dotenv import load_dotenv
 from web3 import Web3
 
-from .constants import ETH_ADDRESS
-from .token import BaseToken
-from .tokens import get_tokens
-from .uniswap import AddressLike, Uniswap, _str_to_addr
+from uniswap.dto.constants import ETH_ADDRESS
+from uniswap.dto.entities.token import BaseToken
+from uniswap.tokens import get_tokens
+from uniswap.uniswap import _str_to_addr, AddressLike, Uniswap
 
 logger = logging.getLogger(__name__)
 
@@ -62,7 +62,10 @@ def main(ctx: click.Context, verbose: bool, version: str) -> None:
 )
 @click.option(
     "--quantity",
-    help="Quantity of output tokens to get price of. Falls back to one full unit of the input token by default (10**18 for WETH, for example).",
+    help=(
+        "Quantity of output tokens to get price of. Falls back to one full"
+        "unit of the input token by default (10**18 for WETH, for example)."
+    ),
 )
 @click.pass_context
 def price(

@@ -1,6 +1,6 @@
 from dataclasses import dataclass
 
-from .types import AddressLike
+from uniswap.dto.types import AddressLike
 
 
 @dataclass

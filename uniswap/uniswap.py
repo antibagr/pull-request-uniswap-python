@@ -1,18 +1,10 @@
+import enum
 import functools
 import logging
 import os
 import time
 from collections import namedtuple
-from typing import (
-    Any,
-    Dict,
-    Iterable,
-    List,
-    Optional,
-    Sequence,
-    Tuple,
-    Union,
-)
+from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple, Union
 
 from eth_typing.evm import Address, ChecksumAddress
 from hexbytes import HexBytes
@@ -22,31 +14,33 @@ from web3._utils.normalizers import BASE_RETURN_NORMALIZERS
 from web3.contract import Contract
 from web3.contract.contract import ContractFunction
 from web3.exceptions import BadFunctionCallOutput, ContractLogicError
-from web3.types import (
-    Nonce,
-    TxParams,
-    TxReceipt,
-    Wei,
-)
+from web3.types import Nonce, TxParams, TxReceipt, Wei
 
-from .constants import (
-    ETH_ADDRESS,
-    MAX_TICK,
-    MAX_UINT_128,
-    MIN_TICK,
-    WETH9_ADDRESS,
+from uniswap.dto.constants import (
     _factory_contract_addresses_v1,
     _factory_contract_addresses_v2,
     _netid_to_name,
     _router_contract_addresses_v2,
     _tick_bitmap_range,
     _tick_spacing,
+    ETH_ADDRESS,
+    MAX_TICK,
+    MAX_UINT_128,
+    MIN_TICK,
+    WETH9_ADDRESS,
 )
-from .decorators import check_approval, supports
-from .exceptions import InsufficientBalance, InvalidToken
-from .token import ERC20Token
-from .types import AddressLike
-from .util import (
+from uniswap.dto.entities.token import ERC20Token
+from uniswap.dto.enums import FeeTier
+from uniswap.dto.exceptions import (
+    InsufficientBalance,
+    InvalidToken,
+    InvalidTokenArgument,
+    UnknownNetworkId,
+    UnsupportedUniSwapVersion,
+    UniswapUnsupportedFunctionality,
+)
+from uniswap.dto.types import AddressLike
+from uniswap.util import (
     _addr_to_str,
     _get_eth_simple_cache_middleware,
     _load_contract,
@@ -59,6 +53,8 @@ from .util import (
     nearest_tick,
     realised_fee_percentage,
 )
+
+from .decorators import check_approval, supports
 
 logger = logging.getLogger(__name__)
 
@@ -103,19 +99,16 @@ class Uniswap:
         :param router_contract_addr: Can be optionally set to override the address of the router contract (v2 only).
         :param enable_caching: Optionally enables middleware caching RPC method calls.
         """
-        self.address = _str_to_addr(
-            address or "0x0000000000000000000000000000000000000000"
-        )
+        self.address = _str_to_addr(address or "0x0000000000000000000000000000000000000000")
         self.private_key = (
-            private_key
-            or "0x0000000000000000000000000000000000000000000000000000000000000000"
+            private_key or "0x0000000000000000000000000000000000000000000000000000000000000000"
         )
 
         self.version = version
-        if self.version not in [1, 2, 3]:
-            raise Exception(
-                f"Invalid version '{self.version}', only 1, 2 or 3 supported"
-            )  # pragma: no cover
+        if self.version not in (1, 2, 3):
+            raise UnsupportedUniSwapVersion(
+                f"Only versions 1, 2 and 3 are supported, not {self.version}"
+            )
 
         # TODO: Write tests for slippage
         self.default_slippage = default_slippage
@@ -136,7 +129,7 @@ class Uniswap:
         if self.netid in _netid_to_name:
             self.netname = _netid_to_name[self.netid]
         else:
-            raise Exception(f"Unknown netid: {self.netid}")  # pragma: no cover
+            raise UnknownNetworkId(f"Unknown netid: {self.netid}")  # pragma: no cover
         logger.info(f"Using {self.w3} ('{self.netname}', netid: {self.netid})")
 
         self.last_nonce: Nonce = self.w3.eth.get_transaction_count(self.address)
@@ -180,44 +173,28 @@ class Uniswap:
             )
         elif self.version == 3:
             # https://github.com/Uniswap/uniswap-v3-periphery/blob/main/deploys.md
-            factory_contract_address = _str_to_addr(
-                "0x1F98431c8aD98523631AE4a59f267346ea31F984"
-            )
+            factory_contract_address = _str_to_addr("0x1F98431c8aD98523631AE4a59f267346ea31F984")
             self.factory_contract = _load_contract(
                 self.w3, abi_name="uniswap-v3/factory", address=factory_contract_address
             )
             quoter_addr = _str_to_addr("0xb27308f9F90D607463bb33eA1BeBb41C27CE5AB6")
-            self.router_address = _str_to_addr(
-                "0xE592427A0AEce92De3Edee1F18E0157C05861564"
-            )
-            self.quoter = _load_contract(
-                self.w3, abi_name="uniswap-v3/quoter", address=quoter_addr
-            )
+            self.router_address = _str_to_addr("0xE592427A0AEce92De3Edee1F18E0157C05861564")
+            self.quoter = _load_contract(self.w3, abi_name="uniswap-v3/quoter", address=quoter_addr)
             self.router = _load_contract(
                 self.w3, abi_name="uniswap-v3/router", address=self.router_address
             )
-            self.positionManager_addr = _str_to_addr(
-                "0xC36442b4a4522E871399CD717aBDD847Ab11FE88"
-            )
+            self.positionManager_addr = _str_to_addr("0xC36442b4a4522E871399CD717aBDD847Ab11FE88")
             self.nonFungiblePositionManager = _load_contract(
                 self.w3,
                 abi_name="uniswap-v3/nonFungiblePositionManager",
                 address=self.positionManager_addr,
             )
             if self.netname == "arbitrum":
-                multicall2_addr = _str_to_addr(
-                    "0x50075F151ABC5B6B448b1272A0a1cFb5CFA25828"
-                )
+                multicall2_addr = _str_to_addr("0x50075F151ABC5B6B448b1272A0a1cFb5CFA25828")
             else:
-                multicall2_addr = _str_to_addr(
-                    "0x5BA1e12693Dc8F9c48aAD8770482f4739bEeD696"
-                )
+                multicall2_addr = _str_to_addr("0x5BA1e12693Dc8F9c48aAD8770482f4739bEeD696")
             self.multicall2 = _load_contract(
                 self.w3, abi_name="uniswap-v3/multicall", address=multicall2_addr
-            )
-        else:
-            raise Exception(
-                f"Invalid version '{self.version}', only 1, 2 or 3 supported"
             )
 
         if hasattr(self, "factory_contract"):
@@ -234,10 +211,7 @@ class Uniswap:
         route: Optional[List[AddressLike]] = None,
     ) -> int:
         """Given `qty` amount of the input `token0`, returns the maximum output amount of output `token1`."""
-        if fee is None:
-            fee = 3000
-            if self.version == 3:
-                logger.warning("No fee set, assuming 0.3%")
+        fee = FeeTier.create(value=fee, version=self.version)
 
         if token0 == ETH_ADDRESS:
             return self._get_eth_token_input_price(token1, Wei(qty), fee)
@@ -255,10 +229,7 @@ class Uniswap:
         route: Optional[List[AddressLike]] = None,
     ) -> int:
         """Returns the minimum amount of `token0` required to buy `qty` amount of `token1`."""
-        if fee is None:
-            fee = 3000
-            if self.version == 3:
-                logger.warning("No fee set, assuming 0.3%")
+        fee = FeeTier.create(value=fee, version=self.version)
 
         if is_same_address(token0, ETH_ADDRESS):
             return self._get_eth_token_output_price(token1, qty, fee)
@@ -286,7 +257,7 @@ class Uniswap:
                 self.get_weth_address(), token, qty, fee=fee
             )  # type: ignore
         else:
-            raise ValueError  # pragma: no cover
+            raise UnsupportedUniSwapVersion(self.version)
         return price
 
     def _get_token_eth_input_price(
@@ -304,11 +275,9 @@ class Uniswap:
                 qty, [token, self.get_weth_address()]
             ).call()[-1]
         elif self.version == 3:
-            price = self._get_token_token_input_price(
-                token, self.get_weth_address(), qty, fee=fee
-            )
+            price = self._get_token_token_input_price(token, self.get_weth_address(), qty, fee=fee)
         else:
-            raise ValueError  # pragma: no cover
+            raise UnsupportedUniSwapVersion(self.version)
         return price
 
     def _get_token_token_input_price(
@@ -342,7 +311,7 @@ class Uniswap:
             if route:
                 # NOTE: to support custom routes we need to support the Path data encoding: https://github.com/Uniswap/uniswap-v3-periphery/blob/main/contracts/libraries/Path.sol
                 # result: tuple = self.quoter.functions.quoteExactInput(route, qty).call()
-                raise Exception("custom route not yet supported for v3")
+                raise UniswapUnsupportedFunctionality.V3.CustomRoutes("custom route not yet supported for v3")
 
             # FIXME: How to calculate this properly? See https://docs.uniswap.org/reference/libraries/SqrtPriceMath
             sqrtPriceLimitX96 = 0
@@ -350,7 +319,7 @@ class Uniswap:
                 token0, token1, fee, qty, sqrtPriceLimitX96
             ).call()
         else:
-            raise ValueError("function not supported for this version of Uniswap")
+            raise UnsupportedUniSwapVersion(self.version)
         return price
 
     def _get_eth_token_output_price(
@@ -367,16 +336,12 @@ class Uniswap:
             route = [self.get_weth_address(), token]
             price = self.router.functions.getAmountsIn(qty, route).call()[0]
         elif self.version == 3:
-            if fee is None:
-                logger.warning("No fee set, assuming 0.3%")
-                fee = 3000
+            fee = FeeTier.create(value=fee, version=self.version)
             price = Wei(
-                self._get_token_token_output_price(
-                    self.get_weth_address(), token, qty, fee=fee
-                )
+                self._get_token_token_output_price(self.get_weth_address(), token, qty, fee=fee)
             )
         else:
-            raise ValueError  # pragma: no cover
+            raise UnsupportedUniSwapVersion(self.version)
         return price
 
     def _get_token_eth_output_price(
@@ -390,14 +355,10 @@ class Uniswap:
             route = [token, self.get_weth_address()]
             price = self.router.functions.getAmountsIn(qty, route).call()[0]
         elif self.version == 3:
-            if not fee:
-                logger.warning("No fee set, assuming 0.3%")
-                fee = 3000
-            price = self._get_token_token_output_price(
-                token, self.get_weth_address(), qty, fee=fee
-            )
+            fee = FeeTier.create(value=fee, version=self.version)
+            price = self._get_token_token_output_price(token, self.get_weth_address(), qty, fee=fee)
         else:
-            raise ValueError  # pragma: no cover
+            raise UnsupportedUniSwapVersion(self.version)
         return price
 
     @supports([2, 3])
@@ -414,6 +375,7 @@ class Uniswap:
 
         :param fee: (v3 only) The pool's fee in hundredths of a bip, i.e. 1e-6 (3000 is 0.3%)
         """
+        fee = FeeTier.create(value=fee, version=self.version)
         if not route:
             if self.version == 2:
                 # If one of the tokens are WETH, delegate to appropriate call.
@@ -429,13 +391,10 @@ class Uniswap:
         if self.version == 2:
             price: int = self.router.functions.getAmountsIn(qty, route).call()[0]
         elif self.version == 3:
-            if not fee:
-                logger.warning("No fee set, assuming 0.3%")
-                fee = 3000
             if route:
                 # NOTE: to support custom routes we need to support the Path data encoding: https://github.com/Uniswap/uniswap-v3-periphery/blob/main/contracts/libraries/Path.sol
                 # result: tuple = self.quoter.functions.quoteExactOutput(route, qty).call()
-                raise Exception("custom route not yet supported for v3")
+                raise UniswapUnsupportedFunctionality.V3.CustomRoutes("custom route not yet supported for v3")
 
             # FIXME: How to calculate this properly?
             #   - https://docs.uniswap.org/reference/libraries/SqrtPriceMath
@@ -445,7 +404,7 @@ class Uniswap:
                 token0, token1, fee, qty, sqrtPriceLimitX96
             ).call()
         else:
-            raise ValueError  # pragma: no cover
+            raise UnsupportedUniSwapVersion(self.version)
         return price
 
     # ------ Make Trade ----------------------------------------------------------------
@@ -464,16 +423,13 @@ class Uniswap:
         if not isinstance(qty, int):
             raise TypeError("swapped quantity must be an integer")
 
-        if fee is None:
-            fee = 3000
-            if self.version == 3:
-                logger.warning("No fee set, assuming 0.3%")
+        fee = FeeTier.create(value=fee, version=self.version)
 
         if slippage is None:
             slippage = self.default_slippage
 
         if input_token == output_token:
-            raise ValueError
+            raise InvalidTokenArgument("input and output tokens cannot be the same")
 
         if input_token == ETH_ADDRESS:
             return self._eth_to_token_swap_input(
@@ -505,29 +461,22 @@ class Uniswap:
         slippage: Optional[float] = None,
     ) -> HexBytes:
         """Make a trade by defining the qty of the output token."""
-        if fee is None:
-            fee = 3000
-            if self.version == 3:
-                logger.warning("No fee set, assuming 0.3%")
+        fee = FeeTier.create(value=fee, version=self.version)
 
         if slippage is None:
             slippage = self.default_slippage
 
         if input_token == output_token:
-            raise ValueError
+            raise InvalidTokenArgument("input and output tokens cannot be the same")
 
         if input_token == ETH_ADDRESS:
             balance = self.get_eth_balance()
             need = self._get_eth_token_output_price(output_token, qty, fee)
             if balance < need:
                 raise InsufficientBalance(balance, need)
-            return self._eth_to_token_swap_output(
-                output_token, qty, recipient, fee, slippage
-            )
+            return self._eth_to_token_swap_output(output_token, qty, recipient, fee, slippage)
         elif output_token == ETH_ADDRESS:
-            return self._token_to_eth_swap_output(
-                input_token, Wei(qty), recipient, fee, slippage
-            )
+            return self._token_to_eth_swap_output(input_token, Wei(qty), recipient, fee, slippage)
         else:
             return self._token_to_token_swap_output(
                 input_token, output_token, qty, recipient, fee, slippage
@@ -544,7 +493,7 @@ class Uniswap:
     ) -> HexBytes:
         """Convert ETH to tokens given an input amount."""
         if output_token == ETH_ADDRESS:
-            raise ValueError
+            raise InvalidTokenArgument("output token cannot be ETH")
 
         eth_balance = self.get_eth_balance()
         if qty > eth_balance:
@@ -568,9 +517,7 @@ class Uniswap:
                 (1 - slippage) * self._get_eth_token_input_price(output_token, qty, fee)
             )
             if fee_on_transfer:
-                func = (
-                    self.router.functions.swapExactETHForTokensSupportingFeeOnTransferTokens
-                )
+                func = self.router.functions.swapExactETHForTokensSupportingFeeOnTransferTokens
             else:
                 func = self.router.functions.swapExactETHForTokens
             return self._build_and_send_tx(
@@ -587,11 +534,10 @@ class Uniswap:
                 recipient = self.address
 
             if fee_on_transfer:
-                raise Exception("fee on transfer not supported by Uniswap v3")
+                raise UniswapUnsupportedFunctionality.V3.FeeOnTranfer("fee on transfer not supported by Uniswap v3")
 
             min_tokens_bought = int(
-                (1 - slippage)
-                * self._get_eth_token_input_price(output_token, qty, fee=fee)
+                (1 - slippage) * self._get_eth_token_input_price(output_token, qty, fee=fee)
             )
             sqrtPriceLimitX96 = 0
 
@@ -611,7 +557,7 @@ class Uniswap:
                 self._get_tx_params(value=qty),
             )
         else:
-            raise ValueError  # pragma: no cover
+            raise UnsupportedUniSwapVersion(self.version)
 
     def _token_to_eth_swap_input(
         self,
@@ -624,7 +570,7 @@ class Uniswap:
     ) -> HexBytes:
         """Convert tokens to ETH given an input amount."""
         if input_token == ETH_ADDRESS:
-            raise ValueError
+            raise InvalidTokenArgument("input token cannot be ETH")
 
         # Balance check
         input_balance = self.get_token_balance(input_token)
@@ -647,9 +593,7 @@ class Uniswap:
                 (1 - slippage) * self._get_token_eth_input_price(input_token, qty, fee)
             )
             if fee_on_transfer:
-                func = (
-                    self.router.functions.swapExactTokensForETHSupportingFeeOnTransferTokens
-                )
+                func = self.router.functions.swapExactTokensForETHSupportingFeeOnTransferTokens
             else:
                 func = self.router.functions.swapExactTokensForETH
             return self._build_and_send_tx(
@@ -666,12 +610,11 @@ class Uniswap:
                 recipient = self.address
 
             if fee_on_transfer:
-                raise Exception("fee on transfer not supported by Uniswap v3")
+                raise UniswapUnsupportedFunctionality.V3.FeeOnTranfer("fee on transfer not supported by Uniswap v3")
 
             output_token = self.get_weth_address()
             min_tokens_bought = int(
-                (1 - slippage)
-                * self._get_token_eth_input_price(input_token, qty, fee=fee)
+                (1 - slippage) * self._get_token_eth_input_price(input_token, qty, fee=fee)
             )
             sqrtPriceLimitX96 = 0
 
@@ -701,7 +644,7 @@ class Uniswap:
                 self._get_tx_params(),
             )
         else:
-            raise ValueError  # pragma: no cover
+            raise UnsupportedUniSwapVersion(self.version)
 
     def _token_to_token_swap_input(
         self,
@@ -722,10 +665,8 @@ class Uniswap:
         if recipient is None:
             recipient = self.address
 
-        if input_token == ETH_ADDRESS:
-            raise ValueError
-        elif output_token == ETH_ADDRESS:
-            raise ValueError
+        if ETH_ADDRESS in (input_token, output_token):
+            raise InvalidTokenArgument("ETH cannot be input or output token")
 
         if self.version == 1:
             token_funcs = self._exchange_contract(input_token).functions
@@ -749,14 +690,10 @@ class Uniswap:
         elif self.version == 2:
             min_tokens_bought = int(
                 (1 - slippage)
-                * self._get_token_token_input_price(
-                    input_token, output_token, qty, fee=fee
-                )
+                * self._get_token_token_input_price(input_token, output_token, qty, fee=fee)
             )
             if fee_on_transfer:
-                func = (
-                    self.router.functions.swapExactTokensForTokensSupportingFeeOnTransferTokens
-                )
+                func = self.router.functions.swapExactTokensForTokensSupportingFeeOnTransferTokens
             else:
                 func = self.router.functions.swapExactTokensForTokens
             return self._build_and_send_tx(
@@ -770,13 +707,11 @@ class Uniswap:
             )
         elif self.version == 3:
             if fee_on_transfer:
-                raise Exception("fee on transfer not supported by Uniswap v3")
+                raise UniswapUnsupportedFunctionality.V3.FeeOnTranfer("fee on transfer not supported by Uniswap v3")
 
             min_tokens_bought = int(
                 (1 - slippage)
-                * self._get_token_token_input_price(
-                    input_token, output_token, qty, fee=fee
-                )
+                * self._get_token_token_input_price(input_token, output_token, qty, fee=fee)
             )
             sqrtPriceLimitX96 = 0
 
@@ -796,7 +731,7 @@ class Uniswap:
                 self._get_tx_params(),
             )
         else:
-            raise ValueError  # pragma: no cover
+            raise UnsupportedUniSwapVersion(self.version)
 
     def _eth_to_token_swap_output(
         self,
@@ -808,7 +743,7 @@ class Uniswap:
     ) -> HexBytes:
         """Convert ETH to tokens given an output amount."""
         if output_token == ETH_ADDRESS:
-            raise ValueError
+            raise InvalidTokenArgument("output token cannot be ETH")
 
         # Balance check
         eth_balance = self.get_eth_balance()
@@ -834,8 +769,7 @@ class Uniswap:
             if recipient is None:
                 recipient = self.address
             eth_qty = int(
-                (1 + slippage)
-                * self._get_eth_token_output_price(output_token, qty, fee)
+                (1 + slippage) * self._get_eth_token_output_price(output_token, qty, fee)
             )  # type: ignore
             return self._build_and_send_tx(
                 self.router.functions.swapETHForExactTokens(
@@ -876,7 +810,7 @@ class Uniswap:
                 self._get_tx_params(value=amount_in_max),
             )
         else:
-            raise ValueError
+            raise UnsupportedUniSwapVersion(self.version)
 
     def _token_to_eth_swap_output(
         self,
@@ -888,7 +822,7 @@ class Uniswap:
     ) -> HexBytes:
         """Convert tokens to ETH given an output amount."""
         if input_token == ETH_ADDRESS:
-            raise ValueError
+            raise InvalidTokenArgument("input token cannot be ETH")
 
         # Balance check
         input_balance = self.get_token_balance(input_token)
@@ -956,9 +890,7 @@ class Uniswap:
                 ],
             )
 
-            unwrap_data = self.router.encodeABI(
-                fn_name="unwrapWETH9", args=[qty, recipient]
-            )
+            unwrap_data = self.router.encodeABI(fn_name="unwrapWETH9", args=[qty, recipient])
 
             # Multicall
             return self._build_and_send_tx(
@@ -966,7 +898,7 @@ class Uniswap:
                 self._get_tx_params(),
             )
         else:
-            raise ValueError
+            raise UnsupportedUniSwapVersion(self.version)
 
     def _token_to_token_swap_output(
         self,
@@ -981,10 +913,8 @@ class Uniswap:
 
         :param fee: TODO
         """
-        if input_token == ETH_ADDRESS:
-            raise ValueError
-        elif output_token == ETH_ADDRESS:
-            raise ValueError
+        if ETH_ADDRESS in (input_token, output_token):
+            raise InvalidTokenArgument("ETH cannot be input or output token")
 
         # Balance check
         input_balance = self.get_token_balance(input_token)
@@ -1017,9 +947,7 @@ class Uniswap:
         elif self.version == 2:
             if recipient is None:
                 recipient = self.address
-            cost = self._get_token_token_output_price(
-                input_token, output_token, qty, fee=fee
-            )
+            cost = self._get_token_token_output_price(input_token, output_token, qty, fee=fee)
             amount_in_max = int((1 + slippage) * cost)
             return self._build_and_send_tx(
                 self.router.functions.swapTokensForExactTokens(
@@ -1052,7 +980,7 @@ class Uniswap:
                 self._get_tx_params(),
             )
         else:
-            raise ValueError
+            raise UnsupportedUniSwapVersion(self.version)
 
     # ------ Wallet balance ------------------------------------------------------------
     def get_eth_balance(self) -> Wei:
@@ -1079,9 +1007,7 @@ class Uniswap:
     def get_ex_token_balance(self, token: AddressLike) -> int:
         """Get the balance of a token in an exchange contract."""
         erc20 = _load_contract_erc20(self.w3, token)
-        balance: int = erc20.functions.balanceOf(
-            self._exchange_address_from_token(token)
-        ).call()
+        balance: int = erc20.functions.balanceOf(self._exchange_address_from_token(token)).call()
         return balance
 
     # TODO: ADD TOTAL SUPPLY
@@ -1095,9 +1021,7 @@ class Uniswap:
     # ------ Liquidity -----------------------------------------------------------------
     @supports([1])
     @check_approval
-    def add_liquidity(
-        self, token: AddressLike, max_eth: Wei, min_liquidity: int = 1
-    ) -> HexBytes:
+    def add_liquidity(self, token: AddressLike, max_eth: Wei, min_liquidity: int = 1) -> HexBytes:
         """Add liquidity to the pool."""
         tx_params = self._get_tx_params(max_eth)
         # Add 1 to avoid rounding errors, per
@@ -1112,9 +1036,7 @@ class Uniswap:
     def remove_liquidity(self, token: str, max_token: int) -> HexBytes:
         """Remove liquidity from the pool."""
         func_params = [int(max_token), 1, 1, self._deadline()]
-        function = self._exchange_contract(token).functions.removeLiquidity(
-            *func_params
-        )
+        function = self._exchange_contract(token).functions.removeLiquidity(*func_params)
         return self._build_and_send_tx(function)
 
     @supports([3])
@@ -1151,9 +1073,7 @@ class Uniswap:
         # If pool is not initialized, init pool w/ sqrt_price_x96 encoded from amount_0 & amount_1
         if isInit is False:
             sqrt_pricex96 = encode_sqrt_ratioX96(amount_0, amount_1)
-            pool.functions.initialize(sqrt_pricex96).transact(
-                {"from": _addr_to_str(self.address)}
-            )
+            pool.functions.initialize(sqrt_pricex96).transact({"from": _addr_to_str(self.address)})
 
         nft_manager = self.nonFungiblePositionManager
         token_0_instance.functions.approve(nft_manager.address, amount_0).transact(
@@ -1207,11 +1127,9 @@ class Uniswap:
                 (tokenId, _addr_to_str(self.address), MAX_UINT_128, MAX_UINT_128)
             ).call()
 
-        tx_remove_liquidity = (
-            self.nonFungiblePositionManager.functions.decreaseLiquidity(
-                (tokenId, position[7], amount0Min, amount1Min, deadline)
-            ).transact({"from": _addr_to_str(self.address)})
-        )
+        tx_remove_liquidity = self.nonFungiblePositionManager.functions.decreaseLiquidity(
+            (tokenId, position[7], amount0Min, amount1Min, deadline)
+        ).transact({"from": _addr_to_str(self.address)})
         self.w3.eth.wait_for_transaction_receipt(tx_remove_liquidity)
 
         tx_collect_fees = self.nonFungiblePositionManager.functions.collect(
@@ -1258,9 +1176,7 @@ class Uniswap:
         return max_tick_in_word
 
     # Find minimum tick of word at the smallest index (wordPos) in the tickBitmap that contains an initialized tick
-    def get_min_tick_from_wordpos(
-        self, wordPos: int, tick_spacing: int, fee: int
-    ) -> int:
+    def get_min_tick_from_wordpos(self, wordPos: int, tick_spacing: int, fee: int) -> int:
         compressed_tick = wordPos << 8
         _tick = compressed_tick * tick_spacing
         min_tick_in_word = nearest_tick(_tick, fee)
@@ -1306,9 +1222,7 @@ class Uniswap:
                         )
                         return _max_tick
                     else:
-                        _min_tick = self.get_min_tick_from_wordpos(
-                            wordPos, tick_spacing, fee
-                        )
+                        _min_tick = self.get_min_tick_from_wordpos(wordPos, tick_spacing, fee)
                         return _min_tick
         return False
 
@@ -1347,12 +1261,8 @@ class Uniswap:
         TICK_SPACING = _tick_spacing[fee]
         BITMAP_SPACING = _tick_bitmap_range[fee]
 
-        _max_tick = self.find_tick_from_bitmap(
-            BITMAP_SPACING, pool, TICK_SPACING, fee, True
-        )
-        _min_tick = self.find_tick_from_bitmap(
-            BITMAP_SPACING, pool, TICK_SPACING, fee, False
-        )
+        _max_tick = self.find_tick_from_bitmap(BITMAP_SPACING, pool, TICK_SPACING, fee, True)
+        _min_tick = self.find_tick_from_bitmap(BITMAP_SPACING, pool, TICK_SPACING, fee, False)
         assert _max_tick is not False, "Error finding max tick"
         assert _min_tick is not False, "Error finding min tick"
 
@@ -1391,14 +1301,10 @@ class Uniswap:
 
         # Correcting for each token's respective decimals
         token0_decimals = (
-            _load_contract_erc20(self.w3, pool_immutables["token0"])
-            .functions.decimals()
-            .call()
+            _load_contract_erc20(self.w3, pool_immutables["token0"]).functions.decimals().call()
         )
         token1_decimals = (
-            _load_contract_erc20(self.w3, pool_immutables["token1"])
-            .functions.decimals()
-            .call()
+            _load_contract_erc20(self.w3, pool_immutables["token1"]).functions.decimals().call()
         )
         token0_liquidity = token0_liquidity // (10**token0_decimals)
         token1_liquidity = token1_liquidity // (10**token1_decimals)
@@ -1409,9 +1315,7 @@ class Uniswap:
         """Give an exchange/router max approval of a token."""
         max_approval = self.max_approval_int if not max_approval else max_approval
         contract_addr = (
-            self._exchange_address_from_token(token)
-            if self.version == 1
-            else self.router_address
+            self._exchange_address_from_token(token) if self.version == 1 else self.router_address
         )
         function = _load_contract_erc20(self.w3, token).functions.approve(
             contract_addr, max_approval
@@ -1459,15 +1363,11 @@ class Uniswap:
             # Maybe an issue with ganache? (got GC warnings once...)
             if self.use_estimate_gas:
                 # The Uniswap V3 UI uses 20% margin for transactions
-                transaction["gas"] = Wei(
-                    int(self.w3.eth.estimate_gas(transaction) * 1.2)
-                )
+                transaction["gas"] = Wei(int(self.w3.eth.estimate_gas(transaction) * 1.2))
             else:
                 transaction["gas"] = Wei(250_000)
 
-        signed_txn = self.w3.eth.account.sign_transaction(
-            transaction, private_key=self.private_key
-        )
+        signed_txn = self.w3.eth.account.sign_transaction(transaction, private_key=self.private_key)
         # TODO: This needs to get more complicated if we want to support replacing a transaction
         # FIXME: This does not play nice if transactions are sent from other places using the same wallet.
         try:
@@ -1476,16 +1376,12 @@ class Uniswap:
             logger.debug(f"nonce: {tx_params['nonce']}")
             self.last_nonce = Nonce(tx_params["nonce"] + 1)
 
-    def _get_tx_params(
-        self, value: Wei = Wei(0), gas: Optional[Wei] = None
-    ) -> TxParams:
+    def _get_tx_params(self, value: Wei = Wei(0), gas: Optional[Wei] = None) -> TxParams:
         """Get generic transaction parameters."""
         params: TxParams = {
             "from": _addr_to_str(self.address),
             "value": value,
-            "nonce": max(
-                self.last_nonce, self.w3.eth.get_transaction_count(self.address)
-            ),
+            "nonce": max(self.last_nonce, self.w3.eth.get_transaction_count(self.address)),
         }
 
         if gas:
@@ -1577,15 +1473,11 @@ class Uniswap:
         returns decoded results
         """
         params = [
-            {"target": target, "callData": callData}
-            for target, callData in encoded_functions
+            {"target": target, "callData": callData} for target, callData in encoded_functions
         ]
-        _, results = self.multicall2.functions.aggregate(params).call(
-            block_identifier="latest"
-        )
+        _, results = self.multicall2.functions.aggregate(params).call(block_identifier="latest")
         decoded_results = [
-            self.w3.codec.decode(output_types, multicall_result)
-            for multicall_result in results
+            self.w3.codec.decode(output_types, multicall_result) for multicall_result in results
         ]
         normalized_results = [
             map_abi_data(BASE_RETURN_NORMALIZERS, output_types, decoded_result)
@@ -1638,7 +1530,7 @@ class Uniswap:
         elif self.version == 3:
             address = self.router.functions.WETH9().call()
         else:
-            raise ValueError  # pragma: no cover
+            raise UnsupportedUniSwapVersion(self.version)
 
         # Mainnet WETH9 address
         # WETH9_ADDRESS = "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2"
@@ -1648,7 +1540,7 @@ class Uniswap:
 
     @supports([3])
     def get_pool_instance(
-        self, token_0: AddressLike, token_1: AddressLike, fee: int = 3_000
+        self, token_0: AddressLike, token_1: AddressLike, fee: int = FeeTier.TIER_3000
     ) -> Contract:
         """
         Returns an instance of a pool contract for a given token pair and fee.
@@ -1656,34 +1548,26 @@ class Uniswap:
         Will return 0x0 address if pool does not exist.
         """
 
-        assert token_0 != token_1, "Token addresses cannot be the same"
-        assert fee in list(
-            _tick_spacing.keys()
-        ), "Uniswap V3 only supports three levels of fees: 0.05%, 0.3%, 1%"
+        fee = FeeTier.create(fee, self.version)
 
-        pool_address = self.factory_contract.functions.getPool(
-            token_0, token_1, fee
-        ).call()
+        assert token_0 != token_1, "Token addresses cannot be the same"
+
+        pool_address = self.factory_contract.functions.getPool(token_0, token_1, fee).call()
         assert pool_address != ETH_ADDRESS, "0 address returned. Pool does not exist"
-        pool_instance = _load_contract(
-            self.w3, abi_name="uniswap-v3/pool", address=pool_address
-        )
+        pool_instance = _load_contract(self.w3, abi_name="uniswap-v3/pool", address=pool_address)
 
         return pool_instance
 
     @supports([3])
     def create_pool_instance(
-        self, token_0: AddressLike, token_1: AddressLike, fee: int = 3_000
+        self, token_0: AddressLike, token_1: AddressLike, fee: int = FeeTier.TIER_3000
     ) -> Contract:
         """
         Creates and returns UniswapV3 Pool instance. Requires that fee is valid and no similar pool already exists.
         """
+        fee = FeeTier.create(fee, self.version)
         address = _addr_to_str(self.address)
         assert token_0 != token_1, "Token addresses cannot be the same"
-        assert fee in list(
-            _tick_spacing.keys()
-        ), "Uniswap V3 only supports three levels of fees: 0.05%, 0.3%, 1%"
-
         tx = self.factory_contract.functions.createPool(token_0, token_1, fee).transact(
             {"from": address}
         )
@@ -1691,9 +1575,7 @@ class Uniswap:
 
         event_logs = self.factory_contract.events.PoolCreated().process_receipt(receipt)
         pool_address = event_logs[0]["args"]["pool"]
-        pool_instance = _load_contract(
-            self.w3, abi_name="uniswap-v3/pool", address=pool_address
-        )
+        pool_instance = _load_contract(self.w3, abi_name="uniswap-v3/pool", address=pool_address)
 
         return pool_instance
 
@@ -1745,11 +1627,9 @@ class Uniswap:
         ).call()
         if number_of_positions > 0:
             for idx in range(number_of_positions):
-                position = (
-                    self.nonFungiblePositionManager.functions.tokenOfOwnerByIndex(
-                        _addr_to_str(self.address), idx
-                    ).call()
-                )
+                position = self.nonFungiblePositionManager.functions.tokenOfOwnerByIndex(
+                    _addr_to_str(self.address), idx
+                ).call()
                 positions.append(position)
         return positions
 
@@ -1831,10 +1711,7 @@ class Uniswap:
         Parameter `fee` is required for V3 only, can be omitted for V2
         Requires pair [token_in, token_out] having direct pool
         """
-        if not fee:
-            fee = 3000
-            if self.version == 3:
-                logger.warning("No fee set, assuming 0.3%")
+        fee = FeeTier.create(value=fee, version=self.version)
 
         if token_in == ETH_ADDRESS:
             token_in = self.get_weth_address()
@@ -1847,24 +1724,16 @@ class Uniswap:
                 self.w3.to_checksum_address(token_out),
             ]
             pair_token = self.factory_contract.functions.getPair(*params).call()
-            token_in_erc20 = _load_contract_erc20(
-                self.w3, self.w3.to_checksum_address(token_in)
-            )
+            token_in_erc20 = _load_contract_erc20(self.w3, self.w3.to_checksum_address(token_in))
             token_in_balance = int(
-                token_in_erc20.functions.balanceOf(
-                    self.w3.to_checksum_address(pair_token)
-                ).call()
+                token_in_erc20.functions.balanceOf(self.w3.to_checksum_address(pair_token)).call()
             )
             token_in_decimals = self.get_token(token_in).decimals
             token_in_balance = token_in_balance / (10**token_in_decimals)
 
-            token_out_erc20 = _load_contract_erc20(
-                self.w3, self.w3.to_checksum_address(token_out)
-            )
+            token_out_erc20 = _load_contract_erc20(self.w3, self.w3.to_checksum_address(token_out))
             token_out_balance = int(
-                token_out_erc20.functions.balanceOf(
-                    self.w3.to_checksum_address(pair_token)
-                ).call()
+                token_out_erc20.functions.balanceOf(self.w3.to_checksum_address(pair_token)).call()
             )
             token_out_decimals = self.get_token(token_out).decimals
             token_out_balance = token_out_balance / (10**token_out_decimals)
@@ -1889,9 +1758,7 @@ class Uniswap:
                 den0 = self.get_token(token_out).decimals
                 den1 = self.get_token(token_in).decimals
             sqrtPriceX96 = pool_contract.functions.slot0().call()[0]
-            raw_price = (sqrtPriceX96 * sqrtPriceX96 * 10**den1 >> (96 * 2)) / (
-                10**den0
-            )
+            raw_price = (sqrtPriceX96 * sqrtPriceX96 * 10**den1 >> (96 * 2)) / (10**den0)
             if t1.lower() == token_in.lower():
                 raw_price = 1 / raw_price
         return raw_price
@@ -1926,9 +1793,7 @@ class Uniswap:
             # Occurs when `token_out` amount in the pool equals 0
             return 1
         try:
-            cost_amount = self.get_price_input(
-                token_in, token_out, amount_in, fee=fee, route=route
-            )
+            cost_amount = self.get_price_input(token_in, token_out, amount_in, fee=fee, route=route)
         except ContractLogicError:
             # ContractLogicError is raised when the pool's contract for given `(token_in, token_out, fee)` hasn't been deployed.
             # As `get_price_input()` uses UniswapV3Quoter for getting prices, that contract raises such exception in this situation.
@@ -1961,9 +1826,7 @@ class Uniswap:
 
     @supports([1])
     def _exchange_address_from_token(self, token_addr: AddressLike) -> AddressLike:
-        ex_addr: AddressLike = self.factory_contract.functions.getExchange(
-            token_addr
-        ).call()
+        ex_addr: AddressLike = self.factory_contract.functions.getExchange(token_addr).call()
         # TODO: What happens if the token doesn't have an exchange/doesn't exist?
         #       Should probably raise an Exception (and test it)
         return ex_addr

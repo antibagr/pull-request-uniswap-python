@@ -5,11 +5,12 @@ description = "An unofficial Python wrapper for the decentralized exchange Unisw
 repository = "https://github.com/shanefontaine/uniswap-python"
 readme = "README.md"
 keywords = ["uniswap", "ethereum", "exchange", "trading"]
-authors = ["Shane Fontaine <shane6fontaine@gmail.com>", "Erik Bjäreholt <erik@bjareho.lt>"]
-license = "MIT"
-packages = [
-    { include = "uniswap" },
+authors = [
+    "Shane Fontaine <shane6fontaine@gmail.com>",
+    "Erik Bjäreholt <erik@bjareho.lt>",
 ]
+license = "MIT"
+packages = [{ include = "uniswap" }]
 include = ["uniswap/assets/*.abi", "uniswap/assets/*/*.abi"]
 classifiers = [
     "Intended Audience :: Developers",
@@ -39,10 +40,27 @@ flake8 = "*"
 Sphinx = "*"
 sphinx-book-theme = "*"
 sphinx-click = "*"
-pydata-sphinx-theme = "0.13.1"  # due to: https://github.com/executablebooks/sphinx-book-theme/issues/711
+pydata-sphinx-theme = "0.13.1" # due to: https://github.com/executablebooks/sphinx-book-theme/issues/711
+isort = "5.11"
+flake8-pyproject = "^1.2.3"    # Adds support for pyproject.toml
+
+
+[tool.black]
+line-length = 100
+
+[tool.isort]
+profile = "black"
+multi_line_output = 3
+combine_as_imports = true
+force_alphabetical_sort_within_sections = true
+overwrite_in_place = true
+skip_glob = []
+
+[tool.flake8]
+max-line-length = 100
 
 [tool.pytest.ini_options]
-log_cli = false  # to print logs during tests, set to true
+log_cli = false # to print logs during tests, set to true
 #log_level = "NOTSET"
 
 [tool.ruff]
